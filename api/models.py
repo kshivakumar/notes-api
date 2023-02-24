@@ -7,15 +7,26 @@ from django.contrib.auth.models import AbstractUser
 from django.contrib.postgres import fields as pg_models
 
 
+# TODO: Use psycopg2.sql for all raw SQL queries
+
+
 class User(AbstractUser):
-    notebooks = pg_models.ArrayField(models.UUIDField(), default=list, editable=False)
-    # To store user-defined notebook ordering
-    # Reordering is easy compared to managing an additional "ordering" column in Notebook model
+    custom_notebook_order = pg_models.ArrayField(
+        models.UUIDField(), default=list, editable=False
+    )
+    # To store user-defined notebook ordering.
+    # Reordering is easy compared to managing an additional "ordering" column in Notebook model.
     # Ordering notebooks by title/created/updated should be performed on the client side.
-    # Only the order and filter settings are stored on the server side - `preferences` column
+    # Only the order and filter settings are stored on the server side, in `preferences` column.
 
     preferences = models.JSONField(null=True)
     # Store user prefrences, notebook order/filters, any other metadata
+
+    def reposition_notebook(self, notebook_id, *, position=None, after=None):
+        with connection.cursor() as cur:
+            reposition_array_element(
+                cur, self, "custom_notebook_order", notebook_id, position, after
+            )
 
 
 class TimestampedModel(models.Model):
@@ -36,12 +47,16 @@ class TimestampedModel(models.Model):
 # 2. Slightly lower read performance compared to bigint/int8 - https://www.cybertec-postgresql.com/en/int4-vs-int8-vs-uuid-vs-numeric-performance-on-bigger-joins/
 # 3. Larger indexes can worsen write performance
 
-class Notebook(TimestampedModel):
-    uuid = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    title = models.CharField(max_length=100)
 
-    pages = pg_models.ArrayField(models.UUIDField(), default=list, editable=False)
+class Notebook(TimestampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notebooks"
+    )
+    title = models.CharField(max_length=100)
+    custom_page_order = pg_models.ArrayField(
+        models.UUIDField(), default=list, editable=False
+    )
     # To store user-defined page ordering.
     # See `User` preferences field
 
@@ -50,17 +65,51 @@ class Notebook(TimestampedModel):
     # UI behaviour settings(show/hide description, list/thumbnail view, etc).
     # May become a dumping groud for anything that can't be stored in other columns.
 
+    def save(self, *args, **kwargs):
+        with transaction.atomic():
+            # https://docs.djangoproject.com/en/4.1/ref/models/instances/#django.db.models.Model._state:
+            if self._state.adding:
+                with connection.cursor() as cur:
+                    cur.execute(
+                        f"""
+                        UPDATE {self.user._meta.db_table}
+                        SET custom_notebook_order = ARRAY_APPEND(custom_notebook_order, %(notebook_id)s)
+                        WHERE {self.user._meta.pk.column} = %(user_id)s
+                        """,
+                        {"notebook_id": self.pk, "user_id": self.user.pk},
+                    )
+            super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        with connection.cursor() as cur:
+            cur.execute(
+                f"""
+               UPDATE {self.user._meta.db_table}
+               SET custom_notebook_order = ARRAY_REMOVE(custom_notebook_order, %(notebook_id)s)
+               WHERE {self.user.pk.column} = %(user_id)s
+               """,
+                {"notebook_id": self.pk, "user_id": self.user.pk},
+            )
+            super().delete(*args, **kwargs)
+
+    def reposition_page(self, page_id, *, position=None, after=None):
+        with connection.cursor() as cur:
+            reposition_array_element(
+                cur, self, "custom_page_order", page_id, position, after
+            )
+
     def __repr__(self):
-        return f"Notebook(user={self.user.username}, uuid={self.uuid}, title={self.title})"
+        return f"Notebook(user={self.user.username}, pk={self.pk}, title={self.title})"
 
 
 class Page(TimestampedModel):
-    uuid = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    notebook = models.ForeignKey(Notebook, on_delete=models.CASCADE)
-
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    notebook = models.ForeignKey(
+        Notebook, on_delete=models.CASCADE, related_name="pages"
+    )
     title = models.CharField(max_length=100)
 
-    blocks = pg_models.ArrayField(models.UUIDField(), default=list, editable=False)
+    block_order = pg_models.ArrayField(models.UUIDField(), default=list, editable=False)
     # Using an ArrayField provides implicit ordering of blocks.
     # Blocks always follow user-defined order.
 
@@ -69,16 +118,44 @@ class Page(TimestampedModel):
 
     def save(self, *args, **kwargs):
         with transaction.atomic():
+            if self._state.adding:
+                with connection.cursor() as cur:
+                    cur.execute(
+                        f"""
+                        UPDATE {self.notebook._meta.db_table}
+                        SET custom_page_order = ARRAY_APPEND(custom_page_order, %(page_id)s)
+                        WHERE {self.notebook._meta.pk.column} = %(notebook_id)s""",
+                        {
+                            "notebook_id": self.notebook.pk,
+                            "page_id": self.pk,
+                        },
+                    )
             super().save(*args, **kwargs)
-            with connection.cursor() as cur:
-                # TODO: Use psycopg2.sql
-                cur.execute(f"UPDATE {self.notebook._meta.db_table} SET pages = ARRAY_APPEND(pages, %s) WHERE uuid = %s", [self.uuid, self.notebook.pk])
+
+    def delete(self, *args, **kwargs):
+        with connection.cursor() as cur:
+            cur.execute(
+                f"""
+               UPDATE {self.notebook._meta.db_table}
+               SET custom_page_order = ARRAY_REMOVE(custom_page_order, %(page_id)s)
+               WHERE {self.notebook._meta.pk.column} = %(notebook_id)s
+               """,
+                {
+                    "notebook_id": self.notebook.pk,
+                    "page_id": self.pk,
+                },
+            )
+            super().delete(*args, **kwargs)
+
+    def reposition_block(self, block_id, *, position=None, after=None):
+        with connection.cursor() as cur:
+            reposition_array_element(cur, self, "blocks", block_id, position, after)
 
     def __repr__(self):
-        return f"Page(notebook={self.notebook.uuid}, uuid={self.uuid}, title={self.title})"
+        return f"Page(notebook={self.notebook.pk}, pk={self.pk}, title={self.title})"
 
 
-BLOCK_TYPE = [ # Non-exhaustive list
+BLOCK_TYPE = [  # Non-exhaustive list
     ("h1", "Heading 1"),
     ("h2", "Heading 2"),
     ("h3", "Heading 3"),
@@ -94,51 +171,81 @@ BLOCK_TYPE = [ # Non-exhaustive list
 
 
 class Block(models.Model):
-    uuid = models.UUIDField(default=uuid.uuid4, editable=False)
-    page = models.ForeignKey(Page, on_delete=models.CASCADE)
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    page = models.ForeignKey(Page, on_delete=models.CASCADE, related_name="blocks")
     block_type = models.CharField(max_length=50, choices=BLOCK_TYPE)
 
-    content = pg_models.ArrayField(models.JSONField(), default=list)
-    # Why content is array-of-jsons?
-    # The original intention was to have an array-of-arrays data type where each element is either a text or another array of length two or three.
-    # This would allowing storing the text and the formatting(bold, color, etc) in a compact format.
-    # If the text is "It's a rare, but dangerous potion" where "rare" is in bold and "dangerous" in red,
-    # it would be stored as ["It's a ", ["rare", "b"], ", but ", ["dangerous", "color", "#ff0000"], " potion"].
-    # ArrayField(ArrayField()) is not possible because Postgres requires all the inner arrays be of same size.
-    # With array-of-jsons, data would be stored as [["It's a "], ["rare", "b"], [", but "], ["dangerous", "color", "#ff0000"], [" potion"]]
-
-    # Why not just `content = JSONField()`?
-    # ArrayField provides an intuitive and efficient "append" operation which is going to be the most common operation on the content field.
-
-    # TODO: Explore alternative databases (e.g., MongoDB) for storing Blocks
-    # that support mixed data types in `content` and efficient array/json operations.
+    content = models.TextField()
+    # In the current implementation, whenever there's a change in the text,
+    # the entire `content` field is overridden with the new or modified text.
+    # In a future implementation, only the new/modified/deleted text will be
+    # updated in the database. This could be achieved either through
+    # a new data type that supports such operations efficiently
+    # or by using string operators/functions if the text field is retained.
+    # Formatting information such as bold or italic text is stored in the `metadata` field.
+    # If the text is "It's a rare, but dangerous potion"
+    # where "rare" is in bold and "dangerous" in red,
+    # the metadata could be {"b": [7, 10], "#ff0000": [17, 25]} where the values are char indexes.
+    # This representation may change and is ultimately dictated
+    # by how efficiently the client can parse and render the text.
 
     metadata = models.JSONField(null=True)
-    # Primarily useful for non-text and container-type blocks such as image/video embeddings(size, show/hide thumbnail, etc.),
-    # tables, backlinks and to-do lists
+    # To store formatting information for text blocks,
+    # configuration details for container blocks (tables, backlinks, to-do lists, etc.),
+    # and display settings(such as size, thumbnail visibility) for
+    # embedded blocks(images, videos, docs, etc.)
 
     def save(self, *args, **kwargs):
         with transaction.atomic():
+            if self._state.adding:
+                with connection.cursor() as cur:
+                    cur.execute(
+                        f"""
+                        UPDATE {self.page._meta.db_table}
+                        SET block_order = ARRAY_APPEND(block_order, %(block_id)s)
+                        WHERE {self.page._meta.pk.column} = %(page_id)s""",
+                        {
+                            "page_id": self.page.pk,
+                            "block_id": self.pk,
+                        },
+                    )
             super().save(*args, **kwargs)
-            with connection.cursor() as cur:
-                # TODO: Use psycopg2.sql
-                cur.execute(f"UPDATE {self.page._meta.db_table} SET blocks = ARRAY_APPEND(blocks, %s) WHERE uuid = %s", [self.uuid, self.page.pk])
+
+    def delete(self, *args, **kwargs):
+        with connection.cursor() as cur:
+            cur.execute(
+                f"""
+               UPDATE {self.page._meta.db_table}
+               SET block_order = ARRAY_REMOVE(block_order, %(block_id)s)
+               WHERE {self.page._meta.pk.column} = %(page_id)s
+               """,
+                {"page_id": self.page.pk, "block_id": self.pk},
+            )
+            super().delete(*args, **kwargs)
 
     def __repr__(self):
-        return f"Block(page={self.page.uuid}, id={self.id}, content={self.content})"
+        return f"Block(page={self.page.pk}, pk={self.pk}, content={self.content})"
 
 
 class NotesRecycleBin(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    item_type = models.CharField(max_length=100, choices=[("notebook", "Notebook"), ("page", "Page")])
+    notebook_id = models.UUIDField()
+    notebook_title = models.CharField(max_length=100)
+    # Since notebook is the main container/context,
+    # adding notebook id and title for quick access
+
+    item_type = models.CharField(
+        max_length=100, choices=[("notebook", "Notebook"), ("page", "Page")]
+    )
     item = models.JSONField()
     # Store the entire hierarchy of {notebook -> pages -> blocks} or {pages -> blocks} as json
 
     deleted_on = models.DateTimeField(auto_now_add=True)
-    
+
     def __repr__(self):
         return f"NotesRecycleBin(user={self.user.username}, item_type={self.item_type})"
+
 
 # Why a separate table for storing deleted notebook/pages?
 # Why not just add a `is_deleted` field to Notebook/Page model?
@@ -149,3 +256,42 @@ class NotesRecycleBin(models.Model):
 #    Not a major issue since end-users are willing to wait during restoration.
 #    Some kind of queueing mechanism can be used to improve "Delete" operation UX.
 
+
+def reposition_array_element(cur, instance, arr_field, elem, position=None, after=None):
+    if position == "top":
+        cur.execute(
+            f"""
+            UPDATE {instance._meta.db_table}
+            SET {arr_field} = ARRAY_PREPEND(%(elem)s::uuid, ARRAY_REMOVE({arr_field}, %(elem)s::uuid))
+            WHERE {instance._meta.pk.column} = %(pk)s
+            """,
+            {"elem": elem, "pk": instance.pk},
+        )
+    elif position == "bottom":
+        cur.execute(
+            f"""
+            UPDATE {instance._meta.db_table}
+            SET {arr_field} = ARRAY_APPEND(ARRAY_REMOVE({arr_field}, %(elem)s::uuid), %(elem)s::uuid)
+            WHERE {instance._meta.pk.column} = %(pk)s
+            """,
+            {"elem": elem, "pk": instance.pk},
+        )
+    elif after:
+        cur.execute(
+            f"""
+            UPDATE {instance._meta.db_table}
+            SET {arr_field} = ARRAY_CAT(
+                ARRAY_CAT(
+                    ARRAY_REMOVE({arr_field}[:ARRAY_POSITION({arr_field}, %(after)s::uuid)], %(elem)s::uuid),
+                    ARRAY[%(after)s::uuid, %(elem)s::uuid]
+                ),
+                ARRAY_REMOVE({arr_field}[ARRAY_POSITION({arr_field}, %(after)s::uuid) + 1:], %(elem)s::uuid)
+            )
+            WHERE {instance._meta.pk.column} = %(pk)s
+            """,
+            {"elem": elem, "after": after, "pk": instance.pk},
+        )
+    else:
+        raise ValueError(
+            "At least one of `position`(value=top|bottom) or `after`(uuid) is expected"
+        )
