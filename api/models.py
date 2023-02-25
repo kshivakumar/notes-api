@@ -86,7 +86,7 @@ class Notebook(TimestampedModel):
                 f"""
                UPDATE {self.user._meta.db_table}
                SET custom_notebook_order = ARRAY_REMOVE(custom_notebook_order, %(notebook_id)s)
-               WHERE {self.user.pk.column} = %(user_id)s
+               WHERE {self.user._meta.pk.column} = %(user_id)s
                """,
                 {"notebook_id": self.pk, "user_id": self.user.pk},
             )
@@ -149,7 +149,7 @@ class Page(TimestampedModel):
 
     def reposition_block(self, block_id, *, position=None, after=None):
         with connection.cursor() as cur:
-            reposition_array_element(cur, self, "blocks", block_id, position, after)
+            reposition_array_element(cur, self, "block_order", block_id, position, after)
 
     def __repr__(self):
         return f"Page(notebook={self.notebook.pk}, pk={self.pk}, title={self.title})"
@@ -177,7 +177,7 @@ class Block(models.Model):
 
     content = models.TextField()
     # In the current implementation, whenever there's a change in the text,
-    # the entire `content` field is overridden with the new or modified text.
+    # the entire `content` field is overridden with the new text.
     # In a future implementation, only the new/modified/deleted text will be
     # updated in the database. This could be achieved either through
     # a new data type that supports such operations efficiently
@@ -257,39 +257,43 @@ class NotesRecycleBin(models.Model):
 #    Some kind of queueing mechanism can be used to improve "Delete" operation UX.
 
 
-def reposition_array_element(cur, instance, arr_field, elem, position=None, after=None):
+def reposition_array_element(cur, instance, array_column, element, position=None, after=None):
+    # TODO: Check the element(and the 'after' element) exist
     if position == "top":
         cur.execute(
             f"""
             UPDATE {instance._meta.db_table}
-            SET {arr_field} = ARRAY_PREPEND(%(elem)s::uuid, ARRAY_REMOVE({arr_field}, %(elem)s::uuid))
+            SET {array_column} = ARRAY_PREPEND(%(element)s::uuid, ARRAY_REMOVE({array_column}, %(element)s::uuid))
             WHERE {instance._meta.pk.column} = %(pk)s
             """,
-            {"elem": elem, "pk": instance.pk},
+            {"element": element, "pk": instance.pk},
         )
     elif position == "bottom":
         cur.execute(
             f"""
             UPDATE {instance._meta.db_table}
-            SET {arr_field} = ARRAY_APPEND(ARRAY_REMOVE({arr_field}, %(elem)s::uuid), %(elem)s::uuid)
+            SET {array_column} = ARRAY_APPEND(ARRAY_REMOVE({array_column}, %(element)s::uuid), %(element)s::uuid)
             WHERE {instance._meta.pk.column} = %(pk)s
             """,
-            {"elem": elem, "pk": instance.pk},
+            {"element": element, "pk": instance.pk},
         )
     elif after:
         cur.execute(
             f"""
-            UPDATE {instance._meta.db_table}
-            SET {arr_field} = ARRAY_CAT(
-                ARRAY_CAT(
-                    ARRAY_REMOVE({arr_field}[:ARRAY_POSITION({arr_field}, %(after)s::uuid)], %(elem)s::uuid),
-                    ARRAY[%(after)s::uuid, %(elem)s::uuid]
-                ),
-                ARRAY_REMOVE({arr_field}[ARRAY_POSITION({arr_field}, %(after)s::uuid) + 1:], %(elem)s::uuid)
-            )
-            WHERE {instance._meta.pk.column} = %(pk)s
+            UPDATE
+                { instance._meta.db_table }
+            SET
+                { array_column } = ARRAY_CAT(
+                    (ARRAY_REMOVE({ array_column }, %(element)s)) [:array_position(ARRAY_REMOVE({array_column}, %(element)s), %(after)s)],
+                    ARRAY_CAT(
+                        ARRAY [%(element)s],
+                        (ARRAY_REMOVE({ array_column }, %(element)s)) [array_position(ARRAY_REMOVE({array_column}, %(element)s), %(after)s)+1:]
+                    )
+                )
+            WHERE
+            { instance._meta.pk.column } = %(pk)s
             """,
-            {"elem": elem, "after": after, "pk": instance.pk},
+            {"element": element, "after": after, "pk": instance.pk},
         )
     else:
         raise ValueError(

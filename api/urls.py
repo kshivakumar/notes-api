@@ -1,4 +1,4 @@
-from django.urls import path, include
+from django.urls import path, include, reverse
 from rest_framework import routers
 
 from api import views
@@ -61,7 +61,7 @@ from api import views
 ##########################################################################
 
 router = routers.DefaultRouter()
-router.register("notebooks", views.NotebookViewSet, basename="notebooks")
+router.register("notebooks", views.NotebookViewSet, basename="notebook")
 router.register("recyclebin", views.NotesRecycleBinViewSet, basename="recyclebin")
 
 api_urls = [
@@ -92,6 +92,10 @@ api_urls = [
     path("blocks/<uuid:pk>", views.BlockDetailView.as_view(), name="block-detail"),
 ]
 
+
 urlpatterns = [
     path("api/", include(api_urls), name="api"),
+    path("api-auth/", include("rest_framework.urls"), name="rest_framework"),
+    # TODO: redirect login page to /notebooks
 ]
+
