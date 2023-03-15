@@ -26,12 +26,12 @@ EOF
 
 $PYTHON manage.py migrate
 
-mkdir -p /var/www/static
-chown ec2-user:ec2-user /var/www/static
-chmod 755 /var/www/static
+mkdir -p ${django_static_root}
+chown ec2-user:ec2-user ${django_static_root}
+chmod 755 ${django_static_root}
 $PYTHON manage.py collectstatic --noinput
 
-DJANGO_SUPERUSER_PASSWORD=test_user $PYTHON manage.py createsuperuser --username test_user --email test_user@mail.com --noinput || true
+$PYTHON manage.py create_sample_data --skip-if-exists
 
 cat <<EOF > /etc/systemd/system/gunicorn.service
 [Unit]
@@ -43,7 +43,7 @@ User=ec2-user
 Group=ec2-user
 WorkingDirectory=/app
 EnvironmentFile=/app/.env
-ExecStart=/usr/local/bin/gunicorn --workers 3 --preload --bind 0.0.0.0:${gunicorn_port} --log-level info wsgi:application
+ExecStart=/usr/local/bin/gunicorn --workers 3 --preload --bind 0.0.0.0:${gunicorn_port} wsgi:application
 Restart=always
 StandardOutput=journal
 StandardError=journal

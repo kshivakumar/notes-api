@@ -1,0 +1,44 @@
+services:
+  web:
+    container_name: notes-api-server
+    build: .
+    command: >
+      sh -c "
+        python manage.py migrate &&
+        python manage.py collectstatic --noinput &&
+        gunicorn --workers 3 --preload --bind 0.0.0.0:8000 --access-logfile - wsgi:application
+      " 
+    ports:
+      - 8000:8000
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - DJANGO_DB_HOST=db
+      - DJANGO_DB_NAME=notes_api
+      - DJANGO_DB_USERNAME=postgres
+      - DJANGO_DB_PASSWORD=postgres
+      - 'DJANGO_SECRET_KEY=django-insecure-slj(_efp!da@c#xf+7th@54@0%8_+a#cd-)2&cop%g3_amr-51'
+      - DJANGO_DEBUG=False
+    volumes:
+      - .:/app
+
+  db:
+    image: postgres:14
+    container_name: notes-api-db
+    ports:
+      - 5432:5432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=notes_api
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 5        
+
+volumes:
+  postgres_data:

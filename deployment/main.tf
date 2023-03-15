@@ -84,6 +84,7 @@ resource "aws_instance" "app_server" {
     postgres_password = aws_db_instance.postgres.password
     django_debug      = var.django_debug
     django_secret_key = var.django_secret_key
+    django_static_root = var.django_static_root
     gunicorn_port     = var.gunicorn_port
   }))
 }
