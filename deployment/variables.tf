@@ -59,6 +59,11 @@ variable "django_debug" {
   default = false
 }
 
+variable "django_static_root" {
+  type = string
+  default = "/var/www/static/"
+}
+
 variable "gunicorn_port" {
   type    = number
   default = 8000 # can't use 80, ports below 1024 require superuser privileges
