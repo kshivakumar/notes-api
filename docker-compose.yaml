@@ -1,6 +1,6 @@
 services:
   web:
-    container_name: notes-api-server
+    container_name: notes_api_server
     build: .
     command: >
       sh -c "
@@ -25,7 +25,7 @@ services:
 
   db:
     image: postgres:14
-    container_name: notes-api-db
+    container_name: notes_api_database
     ports:
       - 5432:5432
     volumes:

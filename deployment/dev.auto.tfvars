@@ -1,0 +1,9 @@
+vpc_region = "ap-south-2"
+image_id = "ami-079168d91e76481a6" # amazon linux
+instance_type = "t3.nano"
+postgres_instance_type = "db.t3.micro"
+postgres_storage_type = "gp2"
+postgres_db_size = 10 # in GB
+ec2_key_name = "aws_mac_apsouth2"
+django_secret_key = "django-insecure-slj(_efp!da@c#xf+7th@54@0%8_+a#cd-)2&cop%g3_amr-51"
+django_debug = false
