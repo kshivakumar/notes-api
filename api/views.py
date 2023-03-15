@@ -1,7 +1,7 @@
 from django.db import transaction, connection
 from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
-from rest_framework import generics, mixins, viewsets
+from rest_framework import generics, viewsets
 
 from .models import Notebook, Page, Block, NotesRecycleBin
 from .serializers import (

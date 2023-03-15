@@ -9,6 +9,17 @@ from django.contrib.postgres import fields as pg_models
 
 # TODO: Use psycopg2.sql for all raw SQL queries
 
+#### Note ###
+# Throughout this file, I have deliberately placed line comments _after_
+# the definition or declaration of the code.
+# This approach deviates from the conventional commenting practices.
+#
+# Placing comments after the code seemed more logical.
+# By showing the code first, the reader is given context
+# and a chance to interpret why that piece of code was written that way.
+#
+# In a way this mimics the placement of Python's docstrings.
+
 
 class User(AbstractUser):
     custom_notebook_order = pg_models.ArrayField(
@@ -149,7 +160,9 @@ class Page(TimestampedModel):
 
     def reposition_block(self, block_id, *, position=None, after=None):
         with connection.cursor() as cur:
-            reposition_array_element(cur, self, "block_order", block_id, position, after)
+            reposition_array_element(
+                cur, self, "block_order", block_id, position, after
+            )
 
     def __repr__(self):
         return f"Page(notebook={self.notebook.pk}, pk={self.pk}, title={self.title})"
@@ -257,8 +270,10 @@ class NotesRecycleBin(models.Model):
 #    Some kind of queueing mechanism can be used to improve "Delete" operation UX.
 
 
-def reposition_array_element(cur, instance, array_column, element, position=None, after=None):
-    # TODO: Check the element(and the 'after' element) exist
+def reposition_array_element(
+    cur, instance, array_column, element, position=None, after=None
+):
+    # TODO: Ensure the `element` and the 'after' element exist
     if position == "top":
         cur.execute(
             f"""

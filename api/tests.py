@@ -149,4 +149,3 @@ class PageModelTest(TestCase):
 
         page.reposition_block(b2, after=b1)
         self.assertEqual(Page.objects.get(pk=page.pk).block_order, [b3, b5, b4, b1, b2])
-

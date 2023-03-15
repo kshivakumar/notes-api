@@ -42,4 +42,3 @@ urlpatterns = [
     path("api-auth/", include("rest_framework.urls"), name="rest_framework"),
     # TODO: redirect login page to /api/notebooks
 ]
-
