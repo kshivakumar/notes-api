@@ -50,6 +50,8 @@ Security and performance haven't been focused on yet. The plan is to first add a
 **Database**: PostgreSQL  
 **Deployment**: AWS, [Terraform](https://developer.hashicorp.com/terraform/intro)  
 
+**Development Tools**: [black](https://black.readthedocs.io/en/stable/)(code formatting)
+
 ## API Endpoints
 - **/user**  
 `GET` dictionary of user details, preferences(themes, UI flags), last_viewed_page, etc.
@@ -145,10 +147,15 @@ Reffer to the comments in the [models.py](api/models.py) for explanations of the
      `DJANGO_DB_USERNAME`  
      `DJANGO_DB_PASSWORD`
 
-7. Create sample data  
+7. Collect static files  
+`mkdir -p notes_api/staticfiles`  
+`python manage.py collectstatic`
+
+8. Create sample data  
 `python manage.py create_sample_data`
-8. Start server  
-`gunicorn --workers 3 --bind 0.0.0.0:8000 --access-logfile - wsgi:application`
+
+9. Start server  
+`gunicorn --workers 3 --bind 0.0.0.0:8000 --access-logfile - notes_api.wsgi:application`
 
 Access the api endpoint at http://localhost:8000/api
 
